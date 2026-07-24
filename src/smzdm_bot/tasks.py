@@ -34,7 +34,13 @@ class TaskRunner:
     @tasks.task(name="签到", priority=TaskPriority.HIGH, optional=False)
     def checkin(self) -> CheckinResult:
         """每日签到。"""
-        data = self.client.post("/checkin")
+        data = self.client.post(
+            "/checkin",
+            extra={
+                "touchstone_event": "",
+                "captcha": "",
+            },
+        )
         result = CheckinResult(**data.get("data", {}))
         logger.info(f"连续签到 {result.consecutive_days} 天")
         return result
