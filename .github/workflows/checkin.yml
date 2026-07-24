@@ -22,10 +22,12 @@ jobs:
 
       - name: Run check-in
         env:
-          SMZDM_COOKIE: ${{ secrets.SMZDM_COOKIE }}
+          # 映射旧版 Secrets 到新版环境变量
+          SMZDM_COOKIE: ${{ secrets.ANDROID_COOKIE }}
           SMZDM_SK: ${{ secrets.SK }}
           SMZDM_PUSH_PLUS_TOKEN: ${{ secrets.PUSH_PLUS_TOKEN }}
           SMZDM_SC_KEY: ${{ secrets.SC_KEY }}
+          SMZDM_WECOM_WEBHOOK: ${{ secrets.WECOM_BOT_WEBHOOK }}
           SMZDM_TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           SMZDM_TG_USER_ID: ${{ secrets.TG_USER_ID }}
           SMZDM_TG_API_BASE: ${{ secrets.TG_BOT_API }}
