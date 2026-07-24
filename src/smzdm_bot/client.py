@@ -7,7 +7,7 @@ import random
 import re
 import string
 import time
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import httpx
 from loguru import logger
@@ -21,6 +21,34 @@ SK_KEY = "geZm53XAspb02exN"  # DES 加密密钥
 DEFAULT_VERSION = "10.4.26"
 DEFAULT_VERSION_CODE = "866"
 
+# Cookie 标准化字段（参考 hex-ci/smzdm_script bot.js）
+COOKIE_NORMALIZE_FIELDS = {
+    "smzdm_version": DEFAULT_VERSION,
+    "device_smzdm_version": DEFAULT_VERSION,
+    "v": DEFAULT_VERSION,
+    "device_smzdm_version_code": DEFAULT_VERSION_CODE,
+    "device_system_version": "10.0",
+    "apk_partner_name": "smzdm_download",
+    "partner_name": "smzdm_download",
+    "device_type": "Android",
+    "device_smzdm": "android",
+    "device_name": "Android",
+}
+
+
+def update_cookie(cookie_str: str, name: str, value: str) -> str:
+    """更新 cookie 中指定字段的值（参考 JS updateCookie 实现）。"""
+    encoded = quote(value)
+    # 如果字段已存在则替换，否则在末尾追加
+    pattern = re.compile(rf"(^|;){re.escape(name)}=[^;]*;", re.IGNORECASE)
+    replacement = rf"\1{name}={encoded};"
+    new_cookie = pattern.sub(replacement, cookie_str)
+    if new_cookie == cookie_str:  # 字段不存在，追加
+        if not new_cookie.endswith(";"):
+            new_cookie += ";"
+        new_cookie += f"{name}={encoded};"
+    return new_cookie
+
 
 def parse_cookies(cookie_str: str) -> dict[str, str]:
     """解析 cookie 字符串。"""
@@ -31,11 +59,11 @@ def parse_cookies(cookie_str: str) -> dict[str, str]:
 
 def sign_data(data: dict) -> str:
     """MD5 签名。"""
-    # 过滤空值，排序，并删除值中的空白字符
+    # 过滤空值，排序
     parts = []
     for k, v in sorted(data.items()):
         v_str = str(v).replace(" ", "").replace("\t", "").replace("\n", "")
-        if v_str:  # 只包含非空值
+        if v_str:
             parts.append(f"{k}={v_str}")
     sign_str = "&".join(parts) + f"&key={SIGN_KEY}"
     return hashlib.md5(sign_str.encode()).hexdigest().upper()
@@ -79,6 +107,7 @@ class SmzdmClient:
 
     def __init__(self, config: UserConfig) -> None:
         self._cookie = config.cookie.strip()
+        self._normalize_cookie()  # 标准化 Cookie 设备字段
         self._cookies = parse_cookies(self._cookie)
 
         if not self._cookies.get("sess"):
@@ -92,13 +121,23 @@ class SmzdmClient:
         self._platform = self._cookies.get("device_smzdm", "android")
         self._device_id = self._cookies.get("device_id", random_string(32))
 
-        # SK: 优先使用配置，否则自动生成
+        # SK: 优先使用配置，否则自动生成，都不行则留空（发送时默认 '1'）
         if config.sk:
             self._sk = config.sk
         else:
             self._sk = generate_sk(self.user_id, self._device_id)
             if self._sk:
                 logger.debug("SK 自动生成成功")
+
+    def _normalize_cookie(self) -> None:
+        """标准化 Cookie 中的设备信息字段。
+        
+        参考 hex-ci/smzdm_script bot.js 中的处理方法：
+        将 device_smzdm_version / v / device_type 等字段覆盖为已知的稳定值，
+        确保 API 能正确识别设备信息。
+        """
+        for name, value in COOKIE_NORMALIZE_FIELDS.items():
+            self._cookie = update_cookie(self._cookie, name, value)
 
     def close(self) -> None:
         self._http.close()
@@ -153,9 +192,8 @@ class SmzdmClient:
             "v": self._version,
             "time": f"{int(time.time())}000",
             "token": self._cookies.get("sess", ""),
+            "sk": self._sk if self._sk else "1",
         }
-        if self._sk:
-            data["sk"] = self._sk
         if extra:
             data.update(extra)
         data["sign"] = sign_data(data)
